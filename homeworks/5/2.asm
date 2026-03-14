@@ -7,7 +7,7 @@ data segment para public
 	new_line db 0dh, 0ah, "$"
 	strlen dw ?
 	
-	enter_range_note db "Enter range (like a-z) (a <= z !!!): ","$"
+	enter_range_note db "Enter range (like a-z or z-a): ","$"
 	enter_string_note db "Enter string: ","$"
 	enter_str db 4,3,3 dup(?)
 	start_range db ?
@@ -46,14 +46,37 @@ start:
 	int 21h
 	
 ; range
+	xor cx, cx
+	xor ax, ax
+	
+	mov bx, offset enter_str + 2
+	mov al, byte ptr[bx]
+	add bx, 2
+	mov cl, byte ptr[bx]
+	
+	cmp al, cl							; MODIFY
+	ja range2
+	
+range1:
 	mov bx, offset enter_str + 2
 	mov cl, [bx]
 	mov byte ptr[start_range], cl
+	
 	add bx, 2
 	mov cl, [bx]
 	mov byte ptr[end_range], cl
+	jmp enterstr
+
+range2:
+	mov bx, offset enter_str + 2
+	mov cl, [bx]
+	mov byte ptr[end_range], cl
 	
-; ввод строки
+	add bx, 2
+	mov cl, [bx]
+	mov byte ptr[start_range], cl
+	
+enterstr:
 	mov dx, offset enter_string_note
 	mov ah, 09h
 	int 21h
@@ -87,12 +110,12 @@ loop1:
 	mov si, offset start_range
 	mov al, byte ptr[si]
 	cmp al, byte ptr[bx]
-	jg fail
+	ja fail								; FIXED
 	
 	mov si, offset end_range
 	mov al, byte ptr[si]
 	cmp al, byte ptr[bx]
-	jl fail
+	jb fail								; FIXED
 	
 	add bx, 1
 	loop loop1
