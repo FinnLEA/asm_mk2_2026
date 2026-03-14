@@ -27,8 +27,8 @@ start:
 	int 21h
 	
 	xor bh, bh
-	mov bl, buff[1]
-	mov buff[bx+2], '$'
+	mov bl, byte ptr [buff + 1]
+	mov byte ptr [buff + bx + 2], '$'
 	
 	mov dx, offset buff+2
 	mov ah, 09h
