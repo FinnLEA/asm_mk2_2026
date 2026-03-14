@@ -45,7 +45,7 @@ start:
 	int 21h
 	
 loop1:
-	mov dl, [bx]
+	mov dl, byte ptr[bx]				; FIXED
 	mov ah, 02h
 	int 21h
 	sub bx, 1
@@ -61,7 +61,7 @@ loop1:
 	
 ; 2)
 	mov bx, offset n_times
-	mov cx, [bx]
+	mov cx, word ptr[bx]				; FIXED
 	mov bx, offset string + 2
 	
 loop2:
