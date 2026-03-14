@@ -31,9 +31,16 @@ start:
 	mov ah, 01h
 	int 21h
 	mov byte ptr [reserved], al
-	
+
 	cmp byte ptr [reserved], 0dh
 	je enter_search
+	
+	cmp byte ptr [enter_counter], 1				; FIXED
+	jne label1
+	
+	dec byte ptr [enter_counter]
+
+label1:
 	
 	mov al, byte ptr [reserved]
 	mov cx, offset new_line
@@ -81,11 +88,12 @@ print_string:
 	jmp start
 	
 enter_search:
+	cmp byte ptr[enter_counter], 1				; MODIFY
+	je exit
+
 	inc byte ptr[enter_counter]
 	mov cl, byte ptr[enter_counter]
-	cmp cl, 2
-	je exit
-	jne start
+	jmp start
 	
 exit:
 	mov ax, 4c00h
