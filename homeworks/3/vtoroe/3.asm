@@ -31,32 +31,27 @@ start:
     
     xor dx, dx
     idiv bx
-    
     mov word ptr[z], ax     
 
-  ; ( с = (a + b)^2 )
-  xor bx, bx
-  mov bx, word ptr[a]
-  add bx, word ptr[b]
-  
-  mov ax, bx
-  imul bx
-  mov word ptr [d], ax
-  
-  ; ( с = (a + b)^3 )
-  xor bx, bx
-  mov bx, word ptr[a]
-  add bx, word ptr[b]
-  
-  mov ax, bx
-  imul bx
-  imul bx
-  mov word ptr [d], ax
-  
-  mov word ptr[d], ax
-    
-    mov ax, 4c00h
-    int 21h
+	; ( с = (a + b)^2 )
+	xor ax, ax
+	mov ax, word ptr[a]
+	add ax, word ptr[b]	  
+	imul ax
+	mov word ptr [d], ax
+	  
+	; ( с = (a + b)^3 )
+	mov ax, word ptr[a]
+	add ax, word ptr[b] ;a+b	  
+	mov cx, ax
+	imul ax ;(a+b)^2
+	imul cx ;(a+b) ^3 
+	mov word ptr[d], ax
+	  	
+	mov ax, 4c00h
+	int 21h
     
 code_seg ends
 end start
+
+
