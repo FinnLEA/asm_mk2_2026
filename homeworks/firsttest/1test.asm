@@ -41,7 +41,9 @@ str_max db 254
 str_len db ?           
 str_str db 256 dup(?)  
 new_line db 0ah,0dh,'$'  
+rez dw ?
 data_seg ends
+
 
 code_seg segment para use16
 assume cs:code_seg,ss:stack_seg,ds:data_seg
@@ -63,7 +65,7 @@ crc_tablo:
 	
 crc_loop:
 	
-    mov al,[bx]          ; al = *pcBlock
+    mov al, byte ptr[bx]          ; al = *pcBlock
     inc bx               ; pcBlock++
 
 	xor ah,ah
@@ -82,31 +84,53 @@ crc_loop:
     xor dx,di            ; crc = (crc << 8) ^ Crc16Table[(crc >> 8) ^ *pcBlock++]
 
     loop crc_loop
+
+	ret
 	
-;выводим результат
 print_hex:
-    mov bx, dx            
-    mov cx, 4             
+		mov bx, dx            
+		mov cx, 4             
+
+	print_loop:
+		rol bx, 4             
+		mov al, bl           
+		and al, 0Fh           
     
-print_loop:
-    rol bx, 4             
-    mov al, bl           
-    and al, 0Fh           
+		cmp al, 10
+		jl  number
+		add al, 55            
+		jmp char
+	number:
+		add al, 48            
+	char:
+		mov dl, al
+		mov ah, 02h
+		int 21h
     
-    cmp al, 10
-    jl  number
-    add al, 55            
-    jmp char
-number:
-    add al, 48            
-char:
-    mov dl, al
-    mov ah, 02h
+		loop print_loop
+	ret
+	
+new_line_func:
+	mov ah, 09h
+    mov dx, offset new_line
     int 21h
-    
-    loop print_loop
-    
-	jmp exit
+	ret
+	
+input:
+		
+	mov ah, 0ah
+	mov dx, offset str_max
+	int 21h
+	
+	lea bx, str_str
+	xor ch,ch
+	mov cl, byte ptr[str_len]
+	ret
+
+exit:
+	mov ax, 4c00h
+	int 21h
+	ret
 	
 start:
 	mov ax, data_seg
@@ -114,23 +138,11 @@ start:
 	mov ax, stack_seg
 	mov ss, ax
 	
-	mov ah, 0ah
-	mov dx, offset str_max
-	int 21h
-	
-	mov ah, 09h
-    mov dx, offset new_line
-    int 21h
-	
-	lea bx, str_str
-	xor ch,ch
-	mov cl, byte ptr[str_len]
-
-	jmp crc_tablo
-	
-exit:
-	mov ax, 4c00h
-	int 21h
+	call input
+	call new_line_func
+	call crc_tablo
+	call print_hex
+	call exit
 	
 code_seg ends
 
