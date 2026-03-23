@@ -8,7 +8,7 @@ data segment para public
     max_len db 255
     real_len db ?
     buffer db 256 dup(?)
-    newline db 0ah, 0dh, '$'
+    hex_buffer db 5 dup(?)
 
 	crc16_table	dw 0000h, 1021h, 2042h, 3063h, 4084h, 50A5h, 60C6h, 70E7h
 				dw 8108h, 9129h, 0A14Ah, 0B16Bh, 0C18Ch, 0D1ADh, 0E1CEh, 0F1EFh
@@ -47,73 +47,163 @@ data ends
 code segment para public use16
     assume cs:code, ds:data, ss:stack
 
+crc16 proc
+    push si
+    push di
+    push ax
+    push cx
+    
+    mov dx, 0FFFFh
+    cmp cx, 0
+    je crc16_exit
+    
+crc16_loop:
+    mov al, byte ptr [bx]
+    inc bx
+    xor ah, ah
+    
+    mov si, dx
+    shr si, 8                ; (crc >> 8)
+    xor si, ax               ; (crc >> 8) ^ byte
+    and si, 00FFh
+    
+    shl si, 1
+    mov di, word ptr [crc16_table + si]
+    
+    shl dx, 8                ; crc << 8
+    xor dx, di
+    
+    loop crc16_loop
+    
+crc16_exit:
+    pop cx
+    pop ax
+    pop di
+    pop si
+    ret
+crc16 endp
+
+word_to_hex proc
+    push ax
+    push bx
+    push cx
+    push si
+    
+    mov bx, ax
+    mov cx, 4
+    mov si, di
+    
+hex_convert:
+    rol bx, 4
+    mov al, bl
+    and al, 0Fh
+    
+    cmp al, 10
+    jl hex_digit
+    add al, 55
+    jmp hex_store
+hex_digit:
+    add al, 48
+hex_store:
+    mov byte ptr [si], al
+    inc si
+    loop hex_convert
+    
+    mov byte ptr [si], '$'
+    
+    pop si
+    pop cx
+    pop bx
+    pop ax
+    ret
+word_to_hex endp
+
+print_string proc
+    push ax
+    
+    mov ah, 09h
+    int 21h
+    
+    pop ax
+    ret
+print_string endp
+
+print_newline proc
+    push ax
+    push dx
+    
+    mov ah, 02h
+    mov dl, 0Dh
+    int 21h
+    mov dl, 0Ah
+    int 21h
+    
+    pop dx
+    pop ax
+    ret
+print_newline endp
+
+print_hex_result proc
+    push ax
+    push dx
+    push di
+    
+    mov ax, dx
+    lea di, [hex_buffer]
+    call word_to_hex
+    
+    lea dx, [hex_buffer]
+    call print_string
+    
+    pop di
+    pop dx
+    pop ax
+    ret
+print_hex_result endp
+
+read_string proc
+    push ax
+    push dx
+    
+    mov ah, 0ah
+    mov dx, bx
+    int 21h
+    
+    call print_newline
+    
+    mov cl, byte ptr [bx + 1]
+    xor ch, ch
+    add bx, 2
+    
+    pop dx
+    pop ax
+    ret
+read_string endp
+
 start:
     mov ax, data
     mov ds, ax
     mov ax, stack
     mov ss, ax
 
-	mov ah, 0ah
-	mov dx, offset max_len
-	int 21h
+    lea bx, [max_len]
+    call read_string 
 
-    mov ah, 09h
-    mov dx, offset newline
-    int 21h
-
-    mov cl, byte ptr [real_len]
-    xor ch, ch
-    lea bx, [buffer]
-
-    mov dx, 0FFFFh ; initial value CRC
     cmp cx, 0
-    je print_part
+    je skip_calc
 
-calc_loop:
-;   crc = (crc << 8) ^ table[(crc >> 8) ^ byte]
-    mov al,  byte ptr [bx]
-    inc bx
-    xor ah, ah
-    mov si, dx
-    shr si, 8 ; (crc >> 8)
-    xor si, ax ; (crc >> 8) ^ byte
-    and si, 00FFh
-
-    shl si, 1 ; *2
-    mov di, word ptr [crc16_table + si]
-
-    shl dx, 8 ; CRC << 8
-    xor dx, di 
-
-    loop calc_loop
-
-print_part:
-    mov bx, dx
-    mov cx, 4
-
-print_hex:
-    rol bx, 4
-    mov al, bl
-    and al, 0Fh
-
-    cmp al, 10
-    jl is_digit
-    add al, 55 ;
-    jmp show_char
-is_digit:
-    add al, 48
-show_char:
-    mov dl, al
-    mov ah, 02h
-    int 21h
-    loop print_hex
-
-    mov ah, 09h
-    mov dx, offset newline
-    int 21h
-
+    call crc16
+    jmp print_result
+    
+skip_calc:
+    mov dx, 0FFFFh
+    
+print_result:
+    call print_hex_result
+    call print_newline
+    
     mov ax, 4c00h
     int 21h
 
 code ends
-end start 
+end start
