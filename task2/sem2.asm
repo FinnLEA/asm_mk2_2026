@@ -1,0 +1,759 @@
+.386
+
+arg1 equ 4
+arg2 equ 6
+arg3 equ 8
+arg4 equ 10
+
+var1 equ -2
+var2 equ -4
+var3 equ -6
+var4 equ -8
+
+stack segment para stack
+    db 65535 dup(?)
+stack ends
+
+data segment para public 
+    buffer_out db 256 dup(0)
+    buffer_in db 1024 dup (?)
+
+    msg_sys db 'Select base (d or h):', 0
+    msg_expr db 'Input expression:', 0
+    msg_dec db 'Decimal: ', 0
+    msg_hex db 'Hexadecimal: 0x', 0
+
+    err_overflow db 'Error: overflow', 0dh, 0ah, 0
+    err_format db 'Error: wrong format', 0dh, 0ah, 0
+    err_div_zero db 'Error: division by zero', 0dh, 0ah, 0
+    
+    error_table dw offset err_overflow, offset err_format, offset err_div_zero
+
+    E_OVERFLOW equ 0
+    E_FORMAT equ 1
+    E_DIV_ZERO equ 2
+
+    parse_func dw 0
+    a dw 0
+    b dw 0
+    oper db 0
+data ends
+
+code segment para public use16
+    assume cs:code, ds:data, ss:stack
+
+show:
+    push bp
+    mov bp, sp
+    mov si, word ptr [bp+arg1]
+    mov ah, 02h
+    
+show_loop:
+    mov dl, byte ptr [si]
+    int 21h
+    inc si
+    test dl, dl
+    jnz show_loop
+    pop bp
+    ret
+
+newline:
+    push bp
+    mov bp, sp
+    mov dl, 0Dh
+    mov ah, 02h
+    int 21h
+    mov dl, 0Ah
+    int 21h
+    pop bp
+    ret
+
+hex_convert:
+    push bp
+    mov bp, sp
+    mov di, word ptr [bp+arg1]
+    mov bx, word ptr [bp+arg2]
+    test bx, bx
+    jnz hc_notzero
+    mov byte ptr [di], '0'
+    inc di
+    jmp hc_done
+    
+hc_notzero:
+    test bx, bx
+    jns hc_positive
+    mov byte ptr [di], '-'
+    inc di
+    neg bx
+    
+hc_positive:
+    mov cx, 4
+    
+hc_loop:
+    rol bx, 4
+    mov al, bl
+    and al, 0Fh
+    cmp al, 10
+    jl hc_digit
+    add al, 'A' - 10
+    jmp hc_store
+    
+hc_digit:
+    add al, '0'
+    
+hc_store:
+    mov byte ptr [di], al
+    inc di
+    loop hc_loop
+    
+hc_done:
+    mov byte ptr [di], 0
+    pop bp
+    ret
+
+dec_convert:
+    push bp
+    mov  bp, sp
+    mov  di, word ptr [bp+arg1]
+    mov  ax, word ptr [bp+arg2]
+    test ax, ax
+    jnz  dc_notzero
+    mov  byte ptr [di], '0'
+    mov  byte ptr [di+1], 0
+    jmp  dc_done
+    
+dc_notzero:
+    xor  bx, bx
+    cmp  ax, 0
+    jge  dc_positive
+    mov  bx, 1
+    neg  ax
+    
+dc_positive:
+    xor  cx, cx
+    mov  si, 10
+    
+dc_div:
+    xor  dx, dx
+    div  si
+    push dx
+    inc  cx
+    test ax, ax
+    jnz  dc_div
+    mov  di, word ptr [bp+arg1]
+    test bx, bx
+    jz   dc_nosign
+    mov  byte ptr [di], '-'
+    inc  di
+    
+dc_nosign:
+    mov  bx, cx
+    jcxz dc_skip
+    
+dc_write:
+    pop  dx
+    add  dl, '0'
+    mov  byte ptr [di], dl
+    inc  di
+    loop dc_write
+    mov byte ptr [di], 0
+    
+dc_skip:
+dc_done:
+    pop  bp
+    ret
+
+; ========== ИСПРАВЛЕННАЯ parse_decimal ==========
+; Теперь корректно возвращает ошибку при буквах
+parse_decimal:
+    push bp
+    mov  bp, sp
+    push si
+    push di
+    push bx
+    push dx
+    mov  si, word ptr [bp+arg1]
+    mov  cx, word ptr [bp+arg2]
+    xor  ax, ax
+    xor  di, di          ; di = 0 положительное, 1 отрицательное
+    test cx, cx
+    jz   pd_error        ; пустая строка - ошибка
+    
+    ; проверка знака
+    mov  bl, byte ptr [si]
+    cmp  bl, '-'
+    jne  pd_nosign
+    inc  di              ; запоминаем, что число отрицательное
+    inc  si
+    dec  cx
+    test cx, cx
+    jz   pd_error        ; только минус - ошибка
+    
+pd_nosign:
+    ; проверяем первый символ - должна быть цифра
+    mov bl, byte ptr [si]
+    cmp bl, '0'
+    jb  pd_error
+    cmp bl, '9'
+    ja  pd_error
+    
+pd_loop:
+    mov  bl, byte ptr [si]
+    
+    ; проверка конца строки (пробел, ноль, CR, LF)
+    cmp  bl, ' '
+    je   pd_end
+    cmp  bl, 0
+    je   pd_end
+    cmp  bl, 0Dh
+    je   pd_end
+    cmp  bl, 0Ah
+    je   pd_end
+    
+    ; проверка, что символ - цифра
+    cmp  bl, '0'
+    jb   pd_error
+    cmp  bl, '9'
+    ja   pd_error
+    
+    sub  bl, '0'
+    mov  bh, 0
+    
+    ; проверка переполнения
+    mov  dx, ax
+    cmp  dx, 3276
+    ja   pd_overflow
+    jne  pd_safe
+    cmp  di, 0
+    jne  pd_neglimit
+    cmp  bl, 7
+    ja   pd_overflow
+    jmp  pd_safe
+    
+pd_neglimit:
+    cmp  bl, 8
+    ja   pd_overflow
+    
+pd_safe:
+    mov  dx, 10
+    mul  dx
+    test dx, dx
+    jnz  pd_overflow
+    add  ax, bx
+    jc   pd_overflow
+    inc  si
+    dec  cx
+    jnz  pd_loop
+    jmp  pd_end
+    
+pd_end:
+    ; применяем знак
+    test di, di
+    jz   pd_done
+    cmp  ax, 32768
+    jne  pd_negnormal
+    mov  ax, -32768
+    jmp  pd_done
+    
+pd_negnormal:
+    neg  ax
+    
+pd_done:
+    clc
+    pop  dx
+    pop  bx
+    pop  di
+    pop  si
+    pop  bp
+    ret
+    
+pd_overflow:
+    mov  ax, E_OVERFLOW
+    stc
+    pop  dx
+    pop  bx
+    pop  di
+    pop  si
+    pop  bp
+    ret
+    
+pd_error:
+    mov  ax, E_FORMAT
+    stc
+    pop  dx
+    pop  bx
+    pop  di
+    pop  si
+    pop  bp
+    ret
+	
+; parse_hexnum - без изменений, работает корректно
+parse_hexnum:
+    push bp
+    mov  bp, sp
+    push si
+    push di
+    push bx
+    push dx
+    mov  si, word ptr [bp+arg1]
+    mov  cx, word ptr [bp+arg2]
+    xor  ax, ax
+    xor  di, di
+    test cx, cx
+    jz   ph_end
+    mov  bl, byte ptr [si]
+    cmp  bl, '-'
+    jne  ph_nosign
+    inc  di
+    inc  si
+    dec  cx
+    test cx, cx
+    jz   ph_end
+    
+ph_nosign:
+    cmp  cx, 2
+    jb   ph_noprefix
+    mov  bl, byte ptr [si]
+    cmp  bl, '0'
+    jne  ph_noprefix
+    mov  bl, byte ptr [si+1]
+    cmp  bl, 'x'
+    je   ph_prefix
+    cmp  bl, 'X'
+    jne  ph_noprefix
+    
+ph_prefix:
+    add  si, 2
+    sub  cx, 2
+    test cx, cx
+    jz   ph_end
+    
+ph_noprefix:
+ph_loop:
+    mov  bl, byte ptr [si]
+    cmp  bl, '0'
+    jb   ph_end
+    cmp  bl, '9'
+    jbe  ph_digit
+    cmp  bl, 'A'
+    jb   ph_end
+    cmp  bl, 'F'
+    jbe  ph_letter
+    cmp  bl, 'a'
+    jb   ph_end
+    cmp  bl, 'f'
+    jbe  ph_letter_low
+    jmp  ph_end
+    
+ph_digit:
+    sub  bl, '0'
+    jmp  ph_got
+    
+ph_letter:
+    sub  bl, 'A'
+    add  bl, 10
+    jmp  ph_got
+    
+ph_letter_low:
+    sub  bl, 'a'
+    add  bl, 10
+    
+ph_got:
+    mov  dx, ax
+    shl  dx, 4
+    cmp  di, 0
+    je   ph_pos
+    cmp  dx, 8000h
+    ja   ph_overflow
+    jmp  ph_add
+    
+ph_pos:
+    cmp  dx, 7FFFh
+    ja   ph_overflow
+    
+ph_add:
+    xor  bh, bh
+    add  dx, bx
+    cmp  di, 0
+    je   ph_pos_add
+    cmp  dx, 8000h
+    ja   ph_overflow
+    cmp  dx, 8000h
+    jne  ph_store
+    cmp  cx, 1
+    jne  ph_overflow
+    
+ph_store:
+    mov  ax, dx
+    jmp  ph_next
+    
+ph_pos_add:
+    cmp  dx, 7FFFh
+    ja   ph_overflow
+    mov  ax, dx
+    
+ph_next:
+    inc  si
+    dec  cx
+    jnz  ph_loop
+    
+ph_end:
+    test di, di
+    jz   ph_done
+    cmp  ax, 8000h
+    je   ph_done
+    neg  ax
+    
+ph_done:
+    pop  dx
+    pop  bx
+    pop  di
+    pop  si
+    pop  bp
+    clc
+    ret
+    
+ph_overflow:
+    pop  dx
+    pop  bx
+    pop  di
+    pop  si
+    pop  bp
+    mov  ax, E_OVERFLOW
+    stc
+    ret
+
+error_handler:
+    push bp
+    mov  bp, sp
+    call newline
+    mov  ax, word ptr [bp+arg1]
+    mov  bx, ax
+    shl  bx, 1
+    mov  dx, word ptr [error_table + bx]
+    push dx
+    call show
+    add sp, 2
+    mov ax, 4cFFh
+    int 21h
+    pop  bp
+    ret
+
+tokenize:
+    push bp
+    mov  bp, sp
+    sub sp, 7
+    mov di, word ptr [bp+arg1]
+    mov cx, word ptr [bp+arg2]
+    mov ax, 0
+    mov word ptr [bp+var1], ax
+    
+token_loop:
+    inc di
+    cmp byte ptr [di], ' '
+    je token_white
+    cmp byte ptr [di], 0Dh
+    je token_end
+    cmp byte ptr [di], 0
+    je token_end
+    loop token_loop
+    
+token_white:
+    mov ax, word ptr [bp+arg1]
+    mov si, di
+    sub di, ax
+    mov ax, di
+    mov di, si
+    push ax
+    push word ptr [bp+arg1]
+    call parse_func
+    jc token_fail
+    add sp, 4
+    mov word ptr [a], ax
+    inc di
+    mov al, byte ptr [di]
+    cmp al, '+'
+    je token_op_ok
+    cmp al, '-'
+    je token_op_ok
+    cmp al, '*'
+    je token_op_ok
+    cmp al, '/'
+    je token_op_ok
+    cmp al, '%'
+    je token_op_ok
+    jmp token_fail_format
+    
+token_op_ok:
+    mov byte ptr [oper], al
+    inc di
+    inc di
+    mov word ptr [bp+var2], di
+    dec di
+    mov ax, word ptr [bp+var1]
+    cmp ax, 1
+    je token_fail_format
+    mov ax, 1
+    mov word ptr [bp+var1], ax
+    loop token_loop
+    
+token_end:
+    mov ax, word ptr [bp+var1]
+    cmp ax, 1
+    jne token_fail_format
+    mov ax, word ptr [bp+var2]
+    sub ax, di
+    mov di, word ptr [bp+var2]
+    cmp ax, 0
+    je token_fail_second
+    push ax
+    push di
+    call parse_func
+    jc token_fail
+    add sp, 4
+    mov word ptr [b], ax
+    mov  sp, bp
+    pop  bp
+    xor ax, ax
+    clc
+    ret
+    
+token_fail:
+    add sp, 4
+    stc
+    mov  sp, bp
+    pop  bp
+    ret
+    
+token_fail_second:
+    add sp, 4
+    mov ax, E_FORMAT
+    stc
+    mov sp, bp
+    pop bp
+    ret
+    
+token_fail_format:
+    mov ax, E_FORMAT
+    stc
+    mov sp, bp
+    pop bp
+    ret
+
+execute:
+    push bp
+    mov  bp, sp
+    sub  sp, 2
+    mov  ax, word ptr [bp+arg1]
+    mov  bx, word ptr [bp+arg2]
+    mov  cl, byte ptr [bp+arg3]
+    cmp  cl, '+'
+    je   exec_add
+    cmp  cl, '-'
+    je   exec_sub
+    cmp  cl, '*'
+    je   exec_mul
+    cmp  cl, '/'
+    je   exec_div
+    cmp  cl, '%'
+    je   exec_mod
+    jmp  exec_format
+    
+exec_add:
+    add  ax, bx
+    jo   exec_overflow
+    clc
+    jmp  exec_done
+    
+exec_sub:
+    sub  ax, bx
+    jo   exec_overflow
+    clc
+    jmp  exec_done
+    
+exec_mul:
+    imul bx
+    cmp dx, 0
+    jg exec_overflow
+    cmp dx, -1
+    jl exec_overflow
+    cmp dx, 0
+    jne mul_neg
+    cmp ax, 0
+    jl exec_overflow
+    jmp mul_ok
+    
+mul_neg:
+    cmp ax, 0
+    jge exec_overflow
+    
+mul_ok:
+    clc
+    jmp  exec_done
+    
+exec_div:
+    test bx, bx
+    jz   exec_divzero
+    cmp  bx, -1
+    jne  do_div
+    cmp  ax, -32768
+    je   exec_overflow
+    
+do_div:
+    cwd
+    idiv bx
+    clc
+    jmp  exec_done
+    
+exec_mod:
+    test bx, bx
+    jz   exec_divzero
+    cmp  bx, -1
+    jne  do_mod
+    cmp  ax, -32768
+    je   exec_overflow
+    
+do_mod:
+    cwd
+    idiv bx
+    mov  ax, dx
+    clc
+    jmp  exec_done
+    
+exec_divzero:
+    mov  ax, E_DIV_ZERO
+    stc
+    jmp  exec_done
+    
+exec_overflow:
+    mov  ax, E_OVERFLOW
+    stc
+    jmp  exec_done
+    
+exec_format:
+    mov  ax, E_FORMAT
+    stc
+    
+exec_done:
+    mov  sp, bp
+    pop  bp
+    ret
+
+start:
+    mov ax, data
+    mov ds, ax
+    mov ax, stack
+    mov ss, ax
+    mov bp, sp
+    sub sp, 6
+    
+    push offset msg_sys
+    call show
+    add sp, 2
+    
+    mov ah, 01h
+    int 21h
+    
+    cmp al, 'd'
+    je decimal_mode
+    cmp al, 'h'
+    je hex_mode
+    cmp al, 'D'
+    je decimal_mode
+    cmp al, 'H'
+    je hex_mode
+    
+    call newline
+    mov ax, E_FORMAT
+    push ax
+    call error_handler
+    add sp, 2
+    
+decimal_mode:
+    mov word ptr [parse_func], offset parse_decimal
+    jmp continue
+    
+hex_mode:
+    mov word ptr [parse_func], offset parse_hexnum
+    
+continue:
+    mov dl, 0DH
+    mov ah, 02h
+    int 21h
+    mov dl, 0AH
+    int 21h
+    
+    push offset msg_expr
+    call show
+    add sp, 2
+    
+    mov bx, 0
+    mov cx, 1023
+    lea dx, buffer_in
+    mov ah, 3Fh
+    int 21h
+    
+    push ax
+    push offset buffer_in
+    call tokenize
+    jc token_failed
+    add sp, 4
+    
+    mov ax, word ptr [a]
+    mov bx, word ptr [b]
+    mov cl, byte ptr [oper]
+    xor ch, ch
+    
+    push cx
+    push word ptr [b]
+    push word ptr [a]
+    call execute
+    jc exec_failed
+    add sp, 6
+    
+    mov word ptr [bp+var1], ax
+    
+    push offset msg_dec
+    call show
+    add sp, 2
+    mov ax, word ptr [bp+var1]
+    push ax
+    push offset buffer_out
+    call dec_convert
+    add sp, 4
+    push offset buffer_out
+    call show
+    add sp, 2
+    call newline
+    
+    push offset msg_hex
+    call show
+    add sp, 2
+    mov ax, word ptr [bp+var1]
+    push ax
+    push offset buffer_out
+    call hex_convert
+    add sp, 4
+    push offset buffer_out
+    call show
+    add sp, 2
+    call newline
+    
+    mov sp, bp
+    mov ax, 4c00h
+    int 21h
+
+exec_failed:
+    add sp, 4
+    
+token_failed:
+    add sp, 4
+    push ax
+    call error_handler
+    add sp, 2
+    mov sp, bp
+    mov ax, 4cFFh
+    int 21h
+
+code ends
+end start
