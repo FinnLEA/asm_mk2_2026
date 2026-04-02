@@ -1084,9 +1084,15 @@ _calculating:
 .continue_divide_calculating1:
 	cwd
 	idiv bx									; divition (integer)
+	xor dx, dx
+	
+	cmp ax, 07FFFh
+	jna .cmp_for_divide_calculating1
+	mov dx, 0FFFFh							; for negative result
+	
+.cmp_for_divide_calculating1:
 	clc
 	jmp .finish_calculating
-	
 
 .divide_checked_calculating:				; the last one is '%'
 	cmp bx, 0								; divide by 0
@@ -1102,6 +1108,13 @@ _calculating:
 	cwd
 	idiv bx									; divition (remainder)
 	mov ax, dx
+	xor dx, dx								; /// FIXED ///
+	
+	cmp ax, 07FFFh
+	jna .cmp_for_divide_calculating2
+	mov dx, 0FFFFh							; for negative remainder
+	
+.cmp_for_divide_calculating2:
 	clc
 	jmp .finish_calculating
 	
@@ -1141,27 +1154,27 @@ _calc:
 	
 	push offset buffer						; check string //////////////////////////////
 	call _check
+	push 2									; saving 2
 	jc .CF_calc
-	add sp, 2
 	
 	push offset strnum1						; atoi for num1 /////////////////////////////
 	call _atoi
-	jc .CF_calc							
-	add sp, 2
-	mov word ptr[number1], ax	
+	push 2									; saving 2
+	jc .CF_calc	
+	mov word ptr[number1], ax
 	
 	push offset strnum2						; atoi for num2 /////////////////////////////
 	call _atoi
+	push 2									; saving 2
 	jc .CF_calc
-	add sp, 2
 	mov word ptr[number2], ax
 	
 	push offset operation					; main calculating //////////////////////////
 	push word ptr[number2]
 	push word ptr[number1]
 	call _calculating
-	jc .CF_calc					
-	add sp, 6
+	push 6									; saving 6
+	jc .CF_calc	
 	
 	mov word ptr[result_low], ax
 	mov word ptr[result_high], dx			
@@ -1201,6 +1214,9 @@ _calc:
 
 	
 .CF_calc:
+	pop dx
+	add sp, dx								; clear stack
+	
 	cmp ax, ERROR_NOTATION
 	je .error1_calc
 
