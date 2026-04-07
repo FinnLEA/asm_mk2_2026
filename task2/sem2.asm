@@ -21,7 +21,7 @@ data segment para public
     msg_sys db 'Select base (d or h):', 0
     msg_expr db 'Input expression:', 0
     msg_dec db 'Decimal: ', 0
-    msg_hex db 'Hexadecimal: 0x', 0
+    msg_hex db 'Hexadecimal:', 0
 
     err_overflow db 'Error: overflow', 0dh, 0ah, 0
     err_format db 'Error: wrong format', 0dh, 0ah, 0
@@ -163,8 +163,6 @@ dc_done:
     pop  bp
     ret
 
-; ========== ИСПРАВЛЕННАЯ parse_decimal ==========
-; Теперь корректно возвращает ошибку при буквах
 parse_decimal:
     push bp
     mov  bp, sp
@@ -175,79 +173,86 @@ parse_decimal:
     mov  si, word ptr [bp+arg1]
     mov  cx, word ptr [bp+arg2]
     xor  ax, ax
-    xor  di, di          ; di = 0 положительное, 1 отрицательное
+    xor  di, di
     test cx, cx
-    jz   pd_error        ; пустая строка - ошибка
+    jz   pd_error
     
-    ; проверка знака
     mov  bl, byte ptr [si]
     cmp  bl, '-'
     jne  pd_nosign
-    inc  di              ; запоминаем, что число отрицательное
+    inc  di
     inc  si
     dec  cx
     test cx, cx
-    jz   pd_error        ; только минус - ошибка
+    jz   pd_error
     
 pd_nosign:
-    ; проверяем первый символ - должна быть цифра
-    mov bl, byte ptr [si]
-    cmp bl, '0'
-    jb  pd_error
-    cmp bl, '9'
-    ja  pd_error
+    push si
+    push cx
     
-pd_loop:
+    mov  bx, 0
+    
+pd_check_loop:
+    mov  dl, byte ptr [si]
+    
+    cmp  dl, ' '
+    je   pd_check_end
+    cmp  dl, 0
+    je   pd_check_end
+    cmp  dl, 0Dh
+    je   pd_check_end
+    cmp  dl, 0Ah
+    je   pd_check_end
+    
+    cmp  dl, '0'
+    jb   pd_format_error
+    cmp  dl, '9'
+    ja   pd_format_error
+    
+    inc  bx
+    inc  si
+    dec  cx
+    jnz  pd_check_loop
+    jmp  pd_check_end
+    
+pd_check_end:
+    cmp  bx, 0
+    je   pd_format_error
+    
+    cmp  bx, 5
+    ja   pd_format_error
+    jmp  pd_check_ok
+    
+pd_check_ok:
+    pop  cx
+    pop  si
+    
+    xor  ax, ax
+    
+pd_convert_loop:
     mov  bl, byte ptr [si]
     
-    ; проверка конца строки (пробел, ноль, CR, LF)
     cmp  bl, ' '
-    je   pd_end
+    je   pd_convert_end
     cmp  bl, 0
-    je   pd_end
+    je   pd_convert_end
     cmp  bl, 0Dh
-    je   pd_end
+    je   pd_convert_end
     cmp  bl, 0Ah
-    je   pd_end
-    
-    ; проверка, что символ - цифра
-    cmp  bl, '0'
-    jb   pd_error
-    cmp  bl, '9'
-    ja   pd_error
+    je   pd_convert_end
     
     sub  bl, '0'
     mov  bh, 0
     
-    ; проверка переполнения
-    mov  dx, ax
-    cmp  dx, 3276
-    ja   pd_overflow
-    jne  pd_safe
-    cmp  di, 0
-    jne  pd_neglimit
-    cmp  bl, 7
-    ja   pd_overflow
-    jmp  pd_safe
-    
-pd_neglimit:
-    cmp  bl, 8
-    ja   pd_overflow
-    
-pd_safe:
     mov  dx, 10
     mul  dx
-    test dx, dx
-    jnz  pd_overflow
     add  ax, bx
-    jc   pd_overflow
+    
     inc  si
     dec  cx
-    jnz  pd_loop
-    jmp  pd_end
+    jnz  pd_convert_loop
     
-pd_end:
-    ; применяем знак
+pd_convert_end:
     test di, di
     jz   pd_done
     cmp  ax, 32768
@@ -267,8 +272,10 @@ pd_done:
     pop  bp
     ret
     
-pd_overflow:
-    mov  ax, E_OVERFLOW
+pd_format_error:
+    pop  cx
+    pop  si
+    mov  ax, E_FORMAT
     stc
     pop  dx
     pop  bx
@@ -286,8 +293,7 @@ pd_error:
     pop  si
     pop  bp
     ret
-	
-; parse_hexnum - без изменений, работает корректно
+
 parse_hexnum:
     push bp
     mov  bp, sp
@@ -300,7 +306,8 @@ parse_hexnum:
     xor  ax, ax
     xor  di, di
     test cx, cx
-    jz   ph_end
+    jz   ph_error
+    
     mov  bl, byte ptr [si]
     cmp  bl, '-'
     jne  ph_nosign
@@ -308,96 +315,117 @@ parse_hexnum:
     inc  si
     dec  cx
     test cx, cx
-    jz   ph_end
+    jz   ph_error
     
 ph_nosign:
-    cmp  cx, 2
-    jb   ph_noprefix
-    mov  bl, byte ptr [si]
-    cmp  bl, '0'
-    jne  ph_noprefix
-    mov  bl, byte ptr [si+1]
-    cmp  bl, 'x'
-    je   ph_prefix
-    cmp  bl, 'X'
-    jne  ph_noprefix
+    push si
+    push cx
     
-ph_prefix:
-    add  si, 2
-    sub  cx, 2
-    test cx, cx
-    jz   ph_end
+    mov  bx, 0
     
-ph_noprefix:
-ph_loop:
+ph_check_loop:
+    mov  dl, byte ptr [si]
+    
+    cmp  dl, ' '
+    je   ph_check_end
+    cmp  dl, 0
+    je   ph_check_end
+    cmp  dl, 0Dh
+    je   ph_check_end
+    cmp  dl, 0Ah
+    je   ph_check_end
+    
+    cmp  dl, '0'
+    jb   ph_format_error
+    cmp  dl, '9'
+    jbe  ph_check_valid
+    cmp  dl, 'A'
+    jb   ph_format_error
+    cmp  dl, 'F'
+    jbe  ph_check_valid
+    cmp  dl, 'a'
+    jb   ph_format_error
+    cmp  dl, 'f'
+    jbe  ph_check_valid
+    jmp  ph_format_error
+    
+ph_check_valid:
+    inc  bx
+    inc  si
+    dec  cx
+    jnz  ph_check_loop
+    jmp  ph_check_end
+    
+ph_check_end:
+    cmp  bx, 0
+    je   ph_format_error
+    
+    cmp  di, 0
+    jne  ph_check_neg_len
+    cmp  bx, 4
+    ja   ph_format_error
+    jmp  ph_check_ok
+    
+ph_check_neg_len:
+    cmp  bx, 4
+    ja   ph_format_error
+    
+ph_check_ok:
+    pop  cx
+    pop  si
+    
+    xor  ax, ax
+    
+ph_convert_loop:
     mov  bl, byte ptr [si]
+    
+    cmp  bl, ' '
+    je   ph_convert_end
+    cmp  bl, 0
+    je   ph_convert_end
+    cmp  bl, 0Dh
+    je   ph_convert_end
+    cmp  bl, 0Ah
+    je   ph_convert_end
+    
     cmp  bl, '0'
-    jb   ph_end
+    jb   ph_convert_error
     cmp  bl, '9'
-    jbe  ph_digit
+    jbe  ph_convert_digit
     cmp  bl, 'A'
-    jb   ph_end
+    jb   ph_convert_error
     cmp  bl, 'F'
-    jbe  ph_letter
+    jbe  ph_convert_letter
     cmp  bl, 'a'
-    jb   ph_end
+    jb   ph_convert_error
     cmp  bl, 'f'
-    jbe  ph_letter_low
-    jmp  ph_end
+    jbe  ph_convert_letter_low
+    jmp  ph_convert_error
     
-ph_digit:
+ph_convert_digit:
     sub  bl, '0'
-    jmp  ph_got
+    jmp  ph_convert_add
     
-ph_letter:
+ph_convert_letter:
     sub  bl, 'A'
     add  bl, 10
-    jmp  ph_got
+    jmp  ph_convert_add
     
-ph_letter_low:
+ph_convert_letter_low:
     sub  bl, 'a'
     add  bl, 10
     
-ph_got:
-    mov  dx, ax
-    shl  dx, 4
-    cmp  di, 0
-    je   ph_pos
-    cmp  dx, 8000h
-    ja   ph_overflow
-    jmp  ph_add
+ph_convert_add:
+    mov  bh, 0
     
-ph_pos:
-    cmp  dx, 7FFFh
-    ja   ph_overflow
+    shl  ax, 4
+    add  ax, bx
     
-ph_add:
-    xor  bh, bh
-    add  dx, bx
-    cmp  di, 0
-    je   ph_pos_add
-    cmp  dx, 8000h
-    ja   ph_overflow
-    cmp  dx, 8000h
-    jne  ph_store
-    cmp  cx, 1
-    jne  ph_overflow
-    
-ph_store:
-    mov  ax, dx
-    jmp  ph_next
-    
-ph_pos_add:
-    cmp  dx, 7FFFh
-    ja   ph_overflow
-    mov  ax, dx
-    
-ph_next:
     inc  si
     dec  cx
-    jnz  ph_loop
+    jnz  ph_convert_loop
     
-ph_end:
+ph_convert_end:
     test di, di
     jz   ph_done
     cmp  ax, 8000h
@@ -405,22 +433,44 @@ ph_end:
     neg  ax
     
 ph_done:
+    clc
     pop  dx
     pop  bx
     pop  di
     pop  si
     pop  bp
-    clc
     ret
     
-ph_overflow:
+ph_format_error:
+    pop  cx
+    pop  si
+    mov  ax, E_FORMAT
+    stc
     pop  dx
     pop  bx
     pop  di
     pop  si
     pop  bp
-    mov  ax, E_OVERFLOW
+    ret
+    
+ph_convert_error:
+    mov  ax, E_FORMAT
     stc
+    pop  dx
+    pop  bx
+    pop  di
+    pop  si
+    pop  bp
+    ret
+    
+ph_error:
+    mov  ax, E_FORMAT
+    stc
+    pop  dx
+    pop  bx
+    pop  di
+    pop  si
+    pop  bp
     ret
 
 error_handler:
