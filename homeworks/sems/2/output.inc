@@ -102,7 +102,6 @@ _print_dec_16 endp
 _print_dec_32 proc near
     push bp
     mov bp, sp
-    sub sp, 4                   ; локальные переменные
 
     push si
     push bx
@@ -111,26 +110,25 @@ _print_dec_32 proc near
 
     mov dx, [bp + arg1]         ; старшие 16 бит
     mov ax, [bp + arg2]         ; младшие 16 бит
-    mov si, offset itoa_buffer
-    xor cx, cx                  ; счётчик цифр
 
-    ; проверка на отрицательное (знаковый бит в DX)
+    mov si, offset itoa_buffer
+    xor cx, cx
+
+    ; проверка на отрицательное
     test dx, 8000h
     jz p32_positive
 
-    ; отрицательное: ставим минус, делаем NEG 32-бит
     mov byte ptr [si], '-'
     inc si
 
-    ; NEG DX:AX = NOT DX:AX + 1
+    ; NEG 32-bit
     not dx
     not ax
     add ax, 1
     adc dx, 0
 
 p32_positive:
-    ; DX:AX содержит абсолютное значение
-    ; если DX:AX = 0
+    ; проверка на ноль
     cmp dx, 0
     jne p32_push_loop
     cmp ax, 0
@@ -141,38 +139,27 @@ p32_positive:
     jmp p32_finish
 
 p32_push_loop:
-    ; проверяем DX:AX == 0
     cmp dx, 0
-    jne p32_divide
+    jne p32_do_divide
     cmp ax, 0
     je p32_pop_loop
 
-p32_divide:
-    ; делим 32-битное число DX:AX на 10
-    ; Шаг 1: делим DX на 10
-    mov di, ax                  ; сохраняем AX
+p32_do_divide:
+    mov di, 10
+
+    ; делим DX:AX на 10
+    mov bx, ax                  ; сохраняем младшую часть
     mov ax, dx                  ; AX = старшая часть
-    xor dx, dx                  ; DX = 0
-    mov bx, 10
-    div bx                      ; AX = частное старшей части, DX = остаток
-    mov [bp + var1], ax         ; сохраняем частное старшей части
+    xor dx, dx
+    div di                      ; AX = старшая/10, DX = остаток
 
-    ; Шаг 2: делим (остаток:DI) на 10
-    mov ax, di                  ; AX = младшая часть, DX = остаток от шага 1
-    div bx                      ; AX = частное младшей части, DX = остаток (цифра)
+    xchg bx, ax                 ; AX = младшая часть, BX = новая старшая
+    div di                      ; AX = новая младшая, DX = цифра
 
-    ; Результат: новое DX:AX
-    mov di, ax                  ; младшая часть частного
-    mov dx, [bp + var1]         ; старшая часть частного
-
-    ; остаток (цифра) сейчас в DX после второго div — нет, в DX после div bx
-    ; Исправление: после второго div, DX = остаток (0-9)
     push dx                     ; сохраняем цифру в стек
     inc cx
 
-    mov ax, di                  ; AX = младшая часть нового числа
-    mov dx, [bp + var1]         ; DX = старшая часть нового числа
-
+    mov dx, bx                  ; DX = новая старшая часть
     jmp p32_push_loop
 
 p32_pop_loop:
@@ -189,7 +176,6 @@ p32_pop_loop:
 p32_finish:
     mov byte ptr [si], 0
 
-    ; выводим
     push offset itoa_buffer
     call _putstr
     add sp, 2

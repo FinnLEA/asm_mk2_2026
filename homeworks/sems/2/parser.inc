@@ -49,12 +49,12 @@ atoi_digits:
     cmp dl, 'A'
     jb atoi_err_invalid
     cmp dl, 'F'
-    jbe atoi_is_hex_upper       ; было atoi_is_digit_AF
+    jbe atoi_is_hex_upper
 
     cmp dl, 'a'
     jb atoi_err_invalid
     cmp dl, 'f'
-    jbe atoi_is_hex_lower       ; было atoi_is_digit_af
+    jbe atoi_is_hex_lower
 
     jmp atoi_err_invalid
 
@@ -62,12 +62,12 @@ atoi_is_digit_09:
     sub dl, '0'
     jmp atoi_accumulate
 
-atoi_is_hex_upper:          ; было atoi_is_digit_AF
+atoi_is_hex_upper:
     sub dl, 'A'
     add dl, 10
     jmp atoi_accumulate
 
-atoi_is_hex_lower:          ; было atoi_is_digit_af
+atoi_is_hex_lower:
     sub dl, 'a'
     add dl, 10
 
@@ -90,11 +90,22 @@ atoi_after_loop:
     cmp cx, 1
     je atoi_negative
 
+    ; положительное число
+    cmp word ptr input_base, 16
+    je atoi_hex_positive
+
+    ; DEC: 0..32767
     cmp ax, 32767
     ja atoi_err_overflow
     jmp atoi_success
 
+atoi_hex_positive:
+    ; HEX без минуса: 0..FFFFh
+    ; числа 8000h-FFFFh будут интерпретированы как отрицательные через WORD
+    jmp atoi_success
+
 atoi_negative:
+    ; отрицательное: абсолютное значение <= 32768
     cmp ax, 32768
     ja atoi_err_overflow
     neg ax
@@ -153,7 +164,7 @@ _check proc near
     je check_err_empty
 
     ; --- запомнить начало числа1 ---
-    mov di, si              ; DI = начало числа1
+    mov di, si
 
     ; --- пропустить знак минуса если есть ---
     cmp byte ptr [si], '-'
@@ -164,18 +175,16 @@ check_skip_sign1:
     ; --- пропустить цифры числа1 ---
 check_num1_loop:
     cmp byte ptr [si], 0
-    je check_err_format         ; строка кончилась без оператора
+    je check_err_format
     cmp byte ptr [si], ' '
-    je check_num1_done          ; нашли пробел — число1 закончилось
+    je check_num1_done
 
-    ; проверяем что символ является цифрой
     mov dl, byte ptr [si]
     cmp dl, '0'
     jb check_err_invalid
     cmp dl, '9'
     jbe check_num1_next
 
-    ; если hex — допускаем A-F, a-f
     cmp word ptr input_base, 10
     je check_err_invalid
 
@@ -196,40 +205,41 @@ check_num1_next:
 
 check_num1_done:
     ; SI указывает на пробел после числа1
-    ; проверяем что число1 не пустое (DI == SI означает 0 цифр,
-    ; или DI+1 == SI при наличии только минуса)
+    ; проверяем что число1 не пустое
     cmp si, di
     je check_err_format
 
     ; --- временно ставим 0 вместо пробела ---
-    mov bl, byte ptr [si]       ; сохраняем пробел в BL
-    mov byte ptr [si], 0        ; ставим конец строки
+    mov bl, byte ptr [si]
+    mov byte ptr [si], 0
 
     ; --- вызываем atoi для числа1 ---
-    push di                     ; адрес начала числа1
+    push di
     call _atoi
+    jc check_atoi1_err          ; проверяем CF ДО add sp!
     add sp, 2
-    
+
+    mov word ptr num1, ax
+    jmp check_restore1
+
+check_atoi1_err:
+    add sp, 2                   ; чистим стек при ошибке
+    mov byte ptr [si], bl       ; восстанавливаем пробел
+    stc
+    jmp check_end               ; AX уже содержит код ошибки
+
+check_restore1:
     ; восстанавливаем пробел
     mov byte ptr [si], bl
-
-    ; проверяем ошибку atoi
-    jc check_end_error          ; CF=1 — ошибка, код уже в AX
-
-    ; сохраняем число1
-    mov word ptr num1, ax
 
     ; --- парсинг оператора ---
     inc si                      ; пропускаем пробел
 
-    ; читаем символ оператора
     mov al, byte ptr [si]
-    
-    ; проверяем что строка не кончилась
+
     cmp al, 0
     je check_err_no_op
-    
-    ; проверяем что это допустимый оператор
+
     cmp al, '+'
     je check_op_ok
     cmp al, '-'
@@ -243,13 +253,13 @@ check_num1_done:
     jmp check_err_invalid_op
 
 check_op_ok:
-    mov byte ptr operator, al   ; сохраняем оператор
-    inc si                      ; переходим за оператор
+    mov byte ptr operator, al
+    inc si
 
     ; --- проверяем пробел после оператора ---
     cmp byte ptr [si], ' '
     jne check_err_format
-    inc si                      ; пропускаем пробел
+    inc si
 
     ; --- проверяем что есть второе число ---
     cmp byte ptr [si], 0
@@ -258,17 +268,17 @@ check_op_ok:
     ; --- запоминаем начало числа2 ---
     mov di, si
 
-    ; --- пропускаем число2 чтобы проверить конец строки ---
-    ; пропустить знак минуса если есть
+    ; --- пропускаем знак минуса если есть ---
     cmp byte ptr [si], '-'
     jne check_skip_sign2
     inc si
 check_skip_sign2:
 
+    ; --- пропускаем цифры числа2 ---
 check_num2_loop:
     cmp byte ptr [si], 0
     je check_num2_done
-    
+
     mov dl, byte ptr [si]
     cmp dl, '0'
     jb check_err_invalid
@@ -294,20 +304,22 @@ check_num2_next:
     jmp check_num2_loop
 
 check_num2_done:
-    ; SI указывает на 0 (конец строки) — это правильно
-    ; если после числа2 мусор — мы бы уже поймали ошибку в цикле
-
     ; --- вызываем atoi для числа2 ---
     push di
     call _atoi
+    jc check_atoi2_err          ; проверяем CF ДО add sp!
     add sp, 2
 
-    jc check_end_error
-
     mov word ptr num2, ax
+    jmp check_success
 
-    ; --- всё успешно ---
-    xor ax, ax                  ; AX = ERROR_SUCCESS = 0
+check_atoi2_err:
+    add sp, 2                   ; чистим стек при ошибке
+    stc
+    jmp check_end               ; AX уже содержит код ошибки
+
+check_success:
+    xor ax, ax                  ; ERROR_SUCCESS = 0
     clc
     jmp check_end
 
@@ -331,11 +343,6 @@ check_err_no_second:
     jmp check_error
 
 check_error:
-    stc
-
-check_end_error:
-    ; сюда приходим если atoi вернул ошибку (CF=1, код в AX)
-    ; или из check_error (CF=1, код в AX)
     stc
 
 check_end:
