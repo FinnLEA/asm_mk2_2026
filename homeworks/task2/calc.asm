@@ -1156,17 +1156,20 @@ _calc:
 	call _check
 	push 2									; saving 2
 	jc .CF_calc
+	add sp, 2								; clear saving value: 2
 	
 	push offset strnum1						; atoi for num1 /////////////////////////////
 	call _atoi
 	push 2									; saving 2
 	jc .CF_calc	
+	add sp, 2								; clear saving value: 2
 	mov word ptr[number1], ax
 	
 	push offset strnum2						; atoi for num2 /////////////////////////////
 	call _atoi
 	push 2									; saving 2
 	jc .CF_calc
+	add sp, 2								; clear saving value: 2
 	mov word ptr[number2], ax
 	
 	push offset operation					; main calculating //////////////////////////
@@ -1175,6 +1178,7 @@ _calc:
 	call _calculating
 	push 6									; saving 6
 	jc .CF_calc	
+	add sp, 2								; clear saving value: 6
 	
 	mov word ptr[result_low], ax
 	mov word ptr[result_high], dx			
