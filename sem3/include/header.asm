@@ -11,9 +11,16 @@ var2 equ -4
 var3 equ -6
 var4 equ -8
 var5 equ -10
+var6 equ -12
+var7 equ -14
+var8 equ -16
+var9 equ -18
+var10 equ -20
+var11 equ -22
+var12 equ -24
 
 SSEG segment para stack use16 "STACK"
-	db 8192 dup(0)
+	db 16384 dup(0)
 SSEG ends
 
 pushr macro reg1, reg2, reg3, reg4, reg5, reg6, reg7, reg8, reg9, reg10
