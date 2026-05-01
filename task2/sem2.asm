@@ -551,8 +551,8 @@ token_end:
     mov ax, word ptr [bp+var1]
     cmp ax, 1
     jne token_fail_format
-    mov ax, word ptr [bp+var2]
-    sub ax, di
+    mov ax, di
+    sub ax, word ptr [bp+var2]
     mov di, word ptr [bp+var2]
     cmp ax, 0
     je token_fail_second
@@ -576,7 +576,6 @@ token_fail:
     ret
     
 token_fail_second:
-    add sp, 4
     mov ax, E_FORMAT
     stc
     mov sp, bp
@@ -794,8 +793,14 @@ continue:
     int 21h
 
 exec_failed:
-    add sp, 4
-    
+    add sp, 6
+    push ax
+    call error_handler
+    add sp, 2
+    mov sp, bp
+    mov ax, 4cFFh
+    int 21h
+
 token_failed:
     add sp, 4
     push ax
