@@ -1,5 +1,3 @@
-; math.inc - Преобразование чисел
-
 ; int atoi(const char *str)
 atoi proc near 
     push bp

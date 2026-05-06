@@ -1,6 +1,3 @@
-; matrix.inc - Работа с файлами и матрицами
-
-; Читает одно слово из файла в tmp_buf
 ReadToken proc near
     push bp
     mov bp, sp
@@ -66,9 +63,8 @@ ReadMatrix proc near
 
 rm_ok:
     mov bx, ax ; bx = fd
-    mov fs, [bp + 6] ; используем FS для доступа к целевому сегменту
+    mov fs, [bp + 6]
 
-    ; Читаем N
     push bx
     call ReadToken
     add sp, 2
@@ -77,7 +73,6 @@ rm_ok:
     add sp, 2
     mov fs:[0], ax ; n
 
-    ; Читаем M
     push bx
     call ReadToken
     add sp, 2
@@ -86,7 +81,6 @@ rm_ok:
     add sp, 2
     mov fs:[2], ax ; m
 
-    ; Читаем элементы
     mov cx, fs:[0]
     imul cx, fs:[2]
     mov di, 4
