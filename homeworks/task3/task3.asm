@@ -16,18 +16,29 @@ db 65530 dup(?)
 stack ends
 
 data segment para public
-	pass1 db 200 dup(0), 0
-	str1 db "12345", 0
+	pass1 db 100 dup(0), 0
+	str1 db "123456", 0
 	
-	pass2 db 200 dup(0), 0
-	str2 db "1", 0
+	pass2 db 100 dup(0), 0
+	str2 db "345", 0
+	
+	pass3 db 100 dup(0), 0
+	char1 db "4", 0
 	
 	dynamic_str1 dw ?
 	dynamic_str2 dw ?
 	
-	str_error_alloc db "Error: allocate memory!", 0
+	result dw ?
 	
-	result db 256 dup(?)
+	buffer db 1024 dup(?),0
+	
+	test_strstr db "	Test strstr():",0
+	test_strchr db "	Test strchr():",0
+	test_strcpy db "	Test strcpy():",0
+	test_strcat db "	Test strcat():",0
+	
+	
+	str_error_alloc db "Error: allocate memory!", 0
 
 data ends
 
@@ -42,6 +53,7 @@ include strchr.inc
 include strcpy.inc
 include strcat.inc
 include errors.inc
+include tests.inc
 
 
 ; char* static_to_dinamic(const char* static) -> return dynamic segment
@@ -83,14 +95,12 @@ _static_to_dinamic proc near
 _static_to_dinamic endp
 
 
-
 start:
     mov ax, data
     mov ds, ax
     mov ax, stack
     mov ss, ax
     
-	
 	push offset str1						; alloc str1
 	call _static_to_dinamic
 	jc .error_alloc
@@ -103,31 +113,7 @@ start:
 	add sp, 2
 	mov word ptr[dynamic_str2], ax
 
-	
-	push word ptr[dynamic_str1]				; print str1
-	call _putstr
-	add sp, 2
-
-	call _putnewline
-	
-	push word ptr[dynamic_str2]				; print str2
-	call _putstr
-	add sp, 2
-	
-	
-	
-	push word ptr[dynamic_str2]				; call strstr()
-	push word ptr[dynamic_str1]
-	call _strstr
-	add sp, 4
-	
-	
-	call _putnewline
-	
-	push ax									; print result
-	call _putstr
-	add sp, 2
-	
+	call _tests								; call tests
 	
 	push word ptr[dynamic_str1]				; free str1
 	call FreeMem
@@ -138,8 +124,6 @@ start:
 	add sp, 2
 
 	jmp .exit0 
-	
-	; call _tests
 	
 .error_alloc:
 	add sp, 2

@@ -1,5 +1,5 @@
 
-; char* strcpy (char* dst, const char* src)
+; char* strcpy (char* es:[dst], const char* src)
 _strcpy proc near
     push bp
     mov bp, sp
@@ -9,8 +9,8 @@ _strcpy proc near
 	xor ax, ax
 	
 .loop_strcpy:
-	mov al, ds:[si]
-	mov es:[di], al
+	mov al, byte ptr ds:[si]
+	mov byte ptr es:[di], al
 	inc si
 	inc di
 	

@@ -5,17 +5,18 @@ _strcat proc near
     mov bp, sp
 	
 	mov bx, word ptr[bp + arg1]				; dst
-	
 	push bx
 	call _strlen
 	add sp, 2
 	
 	mov bx, word ptr[bp + arg1]				; dst
-	mov di, word ptr[bp + arg2]				; src
 	
 	add bx, ax
 	
-	push di
+	mov ax, data
+	mov es, ax
+	
+	push word ptr[bp + arg2]				; src
 	push bx
 	call _strcpy
 	add sp, 4
