@@ -1,0 +1,320 @@
+EOF EQU 0FFh
+
+ACCESS_READ     EQU 0
+ACCESS_WRITE    EQU 1
+
+SEEK_START equ 0
+SEEK_CURRENT_POS equ 1
+SEEK_END equ 2
+
+; access_mode = 
+;   0000 - read access
+;   0001 - write access
+;   0010 - read/write access
+; short fopen(short access_mode, const char* filename)
+; cf flag - as error and return -1
+_fopen proc near 
+    push bp
+    mov bp, sp
+    push cx
+    push dx
+
+    mov cx, word ptr[bp+arg1]
+
+    mov dx, word ptr[bp+arg2] ; filename
+    mov al, cl                ; access mode
+    mov ah, 3Dh               ; function code: 3dh - open file
+    int 21h
+    jc fopen_error
+
+fopen_done:
+    pop dx
+    pop cx
+    mov sp, bp 
+    pop bp
+    ret
+
+fopen_error:
+    jmp fopen_done
+_fopen endp
+
+_fappend_mode proc
+    push bp
+    mov bp, sp
+
+    mov bx, word ptr [bp+arg1]
+    xor cx, cx
+    xor dx, dx
+    mov ah, 42h
+    mov al, 02h
+    int 21h
+
+    mov sp, bp
+    pop bp
+    ret
+_fappend_mode endp
+
+fopen_or_create proc near
+    push bp
+    mov  bp, sp
+    push bx                     ; preserve BX (optional but safe)
+
+    ; Try to open existing file with write access
+    push word ptr [bp+arg1]     ; filename
+    push ACCESS_WRITE
+    call _fopen
+    jnc  fopen_or_create_open_done              ; success, handle already in AX
+    add  sp, 4
+
+    ; Open failed -> create new file (overwrite if exists)
+    mov  ah, 3Ch                ; DOS create file
+    mov  cx, 0                ; normal file attribute
+    mov  dx, word ptr [bp+arg1] ; filename from argument
+    int  21h
+    jc   fopen_or_create_create_failed
+
+    ; Success: AX = file handle, CF already cleared by INT 21h
+    jmp  fopen_or_create_exit
+
+fopen_or_create_create_failed:
+    ; mov  ax, -1
+    stc                         ; set error flag
+    jmp fopen_or_create_exit
+
+fopen_or_create_open_done:
+    add sp, 4
+    clc
+    jmp fopen_or_create_exit
+
+fopen_or_create_exit:
+    pop  bx
+    mov  sp, bp
+    pop  bp
+    ret
+fopen_or_create endp
+
+; bool fclose(short d)
+; cf - flag and return -1
+_fclose proc near
+    push bp
+    mov bp, sp
+    pushregs bx
+
+    mov ah, 3eh
+    mov bx, word ptr [bp+arg1]
+    int 21h
+    jc fclose_error
+
+    xor ax, ax 
+fclose_done:
+    popregs bx
+    mov sp, bp
+    pop bp
+    ret
+
+fclose_error:
+    mov ax, -1
+    jmp fclose_done
+
+_fclose endp
+
+; rel = 
+; 0 - from file start
+; 1 - current pos
+; 2 - end of file
+; int fseek(short d, short offset_high_word, short offset_low_words, short rel)
+; dx:ax - new file pos
+; on error cf flag
+lseek proc near 
+    push bp
+    mov bp, sp
+    pushregs cx, bx
+
+    mov bx, word ptr [bp+arg4]; BX = file handle
+    mov dx, word ptr[bp+arg2] ; offset
+    mov cx, word ptr[bp+arg3] ; offset
+
+    mov ah, 42h
+    mov al, byte ptr[bp+arg1]
+
+    int 21h
+
+    popregs bx, cx
+    mov sp, bp
+    pop bp
+    ret
+lseek endp
+
+; short fsize(int d)
+fsize proc near 
+    push bp
+    mov bp, sp
+
+    ; Get file size
+    push word ptr [bp+arg1]
+    push 0
+    push 0
+    push SEEK_END
+    call lseek
+    jc fsize_error
+    add sp, 8
+
+    pushregs dx, ax
+
+    ; Restore original position
+    push word ptr [bp+arg1]
+    push 0
+    push 0
+    push SEEK_START
+    call lseek
+    add sp, 8
+
+    popregs ax, dx
+
+fsize_done:
+    mov sp, bp
+    pop bp
+    ret
+
+fsize_error:
+    add sp, 8
+    mov ax, -1
+    cwd ; DX:AX = -1
+    jmp fsize_done
+
+fsize endp
+
+; ds:buffer
+; short fread(short d, char* buffer, const short len)
+_fread proc near 
+    push bp
+    mov bp, sp
+    pushregs bx, dx, cx, si
+    
+    mov cx, word ptr [bp+arg3]   ; Load CX with the number of bytes to read (arg3)
+    mov ah, 3Fh                  ; Set DOS function 3Fh (read from file/device)
+    mov bx, word ptr [bp+arg1]   ; Load BX with the file handle (arg1)
+    mov dx, word ptr [bp+arg2]   ; Load DX with the offset of the buffer (arg2)
+    int 21h                      ; Call DOS interrupt to perform the read operation
+    
+    jc fread_failed
+
+    mov si, word ptr [bp+arg2]
+    add si, ax ; SI += bytes_read 
+    mov byte ptr[si], 0 
+fread_done:
+    popregs si, cx, dx, bx
+
+    mov sp, bp
+    pop bp
+    ret
+fread_failed: 
+    mov ax, 0
+    jmp fread_done 
+_fread endp
+
+; ds:buffer
+; short fwrite(short d, char* buffer, short size) 
+_fwrite proc near
+    push bp
+    mov bp, sp
+    
+    mov ah, 40h
+    mov bx, word ptr[bp+arg1]
+    mov cx, word ptr[bp+arg3]
+    mov dx, word ptr[bp+arg2]
+    int 21h
+
+    mov sp, bp
+    pop bp
+    ret
+_fwrite endp
+
+; fread to string
+; char* freadtos(short d, short count_of_bytes)
+freadtos proc near
+    push bp
+    mov bp, sp
+    pushregs ds, bx, cx, dx
+
+    mov bx, word ptr [bp+arg1]
+
+    inc bx
+    push bx 
+    call AllocMem
+    jc freadtos_alloc_failed
+    add sp, 2
+
+    mov es, ax
+
+    push ds
+    push es
+    pop ds ; ds = es
+
+    push word ptr [bp+arg1]
+    push 0 ; es:[0]
+    push word ptr [bp+arg2]
+    call _fread
+    add sp, 6
+    jc freadtos_read_failed
+
+    pop ds ; ds = ds
+    mov ax, es
+    clc
+freadtos_done:
+    popregs dx, cx, bx, ds
+    mov sp, bp
+    pop bp
+    ret
+freadtos_read_failed:
+    pop ds
+    push es
+    call FreeMem
+    add sp, 2
+    xor ax, ax
+    stc
+    jmp freadtos_done
+
+freadtos_alloc_failed:
+    add sp, 2
+    xor ax, ax
+    stc
+    jmp freadtos_done
+freadtos endp
+
+
+_fget_ch PROC NEAR
+        push    bp
+        mov     bp, sp
+        sub     sp, 22           ; local: ret (byte) at [bp-1], buf[20] at [bp-22]
+
+        push ds
+
+        mov ax, stack
+        mov ds, ax
+
+        ; DOS service: read from file handle
+        mov     ah, 3Fh          ; READ
+        mov     bx, [bp+arg1]       ; file descriptor
+        mov     cx, 1            ; read 1 byte
+        lea     dx, [bp-22]      ; buffer address
+        int     21h
+
+        pop ds
+
+        jc      error            ; carry set → error
+        cmp     ax, 1            ; did we read exactly 1 byte?
+        jne     error
+
+        mov     al, [bp-22]      ; get the character
+        mov     [bp-1], al       ; store into 'ret'
+        jmp     done
+
+error:
+        mov     al, 0FFh         ; return -1
+
+done:
+        mov     sp, bp
+        pop     bp
+        ret
+_fget_ch ENDP
